@@ -237,4 +237,4 @@ embedding_cache/
 /*.db-*
 
 # deep eval
-.deepeval/
+.deepeval/.venv/
