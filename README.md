@@ -1,4 +1,4 @@
-# Papeer — Research Paper Assistant
+# PaperTrail — Research Paper Assistant
 
 A conversational AI assistant for students and researchers to upload, explore, and verify academic papers through natural language chat.
 
@@ -6,7 +6,7 @@ A conversational AI assistant for students and researchers to upload, explore, a
 
 ## Project Description
 
-Papeer is a Retrieval-Augmented Generation (RAG) application built with LangGraph, LangChain, and Streamlit. Users upload research papers (PDF, TXT, Markdown, web URL, or ArXiv ID) into isolated sessions, then ask questions about them. The system routes each query intelligently — answering directly from paper content, searching the web for current developments, or verifying whether a claim from a paper has been superseded by newer research.
+PaperTrail is a Retrieval-Augmented Generation (RAG) application built with LangGraph, LangChain, and Streamlit. Users upload research papers (PDF, TXT, Markdown, web URL, or ArXiv ID) into isolated sessions, then ask questions about them. The system routes each query intelligently — answering directly from paper content, searching the web for current developments, or verifying whether a claim from a paper has been superseded by newer research.
 
 ---
 
@@ -65,12 +65,12 @@ Prefix any message with `/btw` to ask a question outside the current paper conte
 
 ## Installation
 
-Papeer uses [uv](https://github.com/astral-sh/uv) for dependency management.
+PaperTrail uses [uv](https://github.com/astral-sh/uv) for dependency management.
 
 ```bash
 # Clone the repository
 git clone <repo-url>
-cd rag-papeer-project
+cd papertrail-research-assistant
 
 # Install all dependencies
 uv sync
@@ -178,7 +178,7 @@ User Query
 
 ## Evaluation
 
-Papeer includes an automated RAG evaluation pipeline (`evaluate.py`) built on [DeepEval](https://github.com/confident-ai/deepeval).
+PaperTrail includes an automated RAG evaluation pipeline (`evaluate.py`) built on [DeepEval](https://github.com/confident-ai/deepeval).
 
 ### Metrics (threshold: 0.7)
 

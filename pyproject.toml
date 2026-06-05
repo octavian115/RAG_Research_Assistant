@@ -1,7 +1,7 @@
 [project]
-name = "rag-papeer-project"
+name = "papertrail-research-assistant"
 version = "0.1.0"
-description = "Add your description here"
+description = "A research paper assistant for reading papers, asking grounded questions, and checking claims."
 readme = "README.md"
 requires-python = ">=3.12"
 dependencies = [
