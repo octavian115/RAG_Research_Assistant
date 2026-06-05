@@ -162,6 +162,7 @@ RETRIEVE_SYSTEM = (
 
 
 # ── Relevancy check ───────────────────────────────────────────────────────────
+# doing it in a single llm call to reduce latency
 
 RELEVANCY_CHECK_SYSTEM = (
     "You are evaluating whether retrieved document chunks are relevant enough "
@@ -190,7 +191,7 @@ def agent_node(state: RAGState) -> dict:
     # Once at the cap, use plain LLM so the agent cannot emit more tool calls.
     # This prevents orphaned tool_call IDs from entering the persisted message history.
     # retrieval llm --> tool call --> tool result
-    # llm --> no tools are bounded --> tool call
+    # llm --> no tools are bounded --> no vc tool call
     lm = llm if current_attempts >= MAX_RETRIEVAL_ATTEMPTS else retrieval_llm
     messages = [{"role": "system", "content": RETRIEVE_SYSTEM}] + state["messages"]
     response = lm.invoke(messages)
@@ -201,6 +202,7 @@ def agent_node(state: RAGState) -> dict:
 
 
 def relevancy_check_node(state: RAGState) -> dict:
+    # to reduce latency not doing one by one on each doc 
     query = state["query"]
     docs = state.get("retrieved_docs") or []
     doc_snippets = "\n\n---\n\n".join(doc.page_content[:300] for doc in docs[:3])
@@ -332,6 +334,7 @@ def generate_answer_node(state: RAGState) -> dict:
                 f"{i + 1}. **{p['title']}**\n   {p['summary']}\n   Link: {p['url']}"
                 for i, p in enumerate(papers)
             )
+            # hardcoded result
             answer = (
                 f"**Claim Verification Result**\n\n"
                 f"> {claim_text}\n\n"
