@@ -159,6 +159,12 @@ ENV/
 env.bak/
 venv.bak/
 
+# App runtime state
+sessions.json
+checkpoints.db
+eval_checkpoints.db
+embedding_cache/
+
 # Spyder project settings
 .spyderproject
 .spyproject

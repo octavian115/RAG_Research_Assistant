@@ -64,10 +64,13 @@ def run_rag_query(graph, query: str, session_id: str) -> tuple[str, list[str]]:
         {
             "messages": [HumanMessage(content=query)],
             "session_id": session_id,
+            "original_query": query,
             "query": query,
+            "retrieval_query": None,
             "retrieved_docs": [],
             "retrieval_attempts": 0,
             "rewrite_count": 0,
+            "chat_history": [],
         },
         config=config,
     )

@@ -61,6 +61,7 @@ def add_paper(docs: list[Document], session_id: str) -> None:
 
 
 def list_papers(session_id: str) -> list[str]:
+    # to load all the papers in the UI in the sidebar
     collection_name = get_collection_name(session_id)
     if not qdrant_client.collection_exists(collection_name):
         return []

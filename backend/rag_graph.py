@@ -7,12 +7,13 @@ warnings.filterwarnings("ignore", message="The default value of `allowed_objects
 
 from dotenv import load_dotenv
 from langchain_core.documents import Document
-from langchain_core.messages import AIMessage, HumanMessage, ToolMessage
+from langchain_core.messages import AIMessage, HumanMessage, RemoveMessage, ToolMessage
 from langchain_core.prompts import ChatPromptTemplate
 from langchain_core.tools import InjectedToolCallId, tool
 from langchain_openai import ChatOpenAI
 from langgraph.checkpoint.sqlite import SqliteSaver
 from langgraph.graph import END, MessagesState, StateGraph
+from langgraph.graph.message import REMOVE_ALL_MESSAGES
 from langgraph.prebuilt import InjectedState, ToolNode, tools_condition
 from langgraph.types import Command
 from pydantic import BaseModel, Field
@@ -30,7 +31,9 @@ llm = ChatOpenAI(model="gpt-5.4-mini")
 
 class RAGState(MessagesState):
     session_id: str
+    original_query: str
     query: str
+    retrieval_query: str | None
     route: str | None
     retrieved_docs: list[Document]
     retrieval_attempts: int
@@ -40,6 +43,7 @@ class RAGState(MessagesState):
     answer: str | None
     is_relevant: bool | None
     rewrite_count: int
+    chat_history: list[dict]
 
 
 # ── Router ────────────────────────────────────────────────────────────────────
@@ -72,9 +76,9 @@ router_chain = ROUTER_PROMPT | llm.with_structured_output(RouterDecision)
 
 
 def router_node(state: RAGState) -> dict:
-    query = state["messages"][-1].content
+    query = state.get("original_query") or state["query"]
     decision: RouterDecision = router_chain.invoke({"query": query})
-    return {"route": decision.route}
+    return {"route": decision.route, "original_query": query, "query": query}
 
 
 # ── Tool schemas ──────────────────────────────────────────────────────────────
@@ -194,6 +198,9 @@ def agent_node(state: RAGState) -> dict:
     # llm --> no tools are bounded --> no vc tool call
     lm = llm if current_attempts >= MAX_RETRIEVAL_ATTEMPTS else retrieval_llm
     messages = [{"role": "system", "content": RETRIEVE_SYSTEM}] + state["messages"]
+    retrieval_query = state.get("retrieval_query")
+    if retrieval_query:
+        messages.append(HumanMessage(content=retrieval_query, additional_kwargs={"papeer_internal": True}))
     response = lm.invoke(messages)
     updates: dict = {"messages": [response]}
     if getattr(response, "tool_calls", None):
@@ -203,7 +210,7 @@ def agent_node(state: RAGState) -> dict:
 
 def relevancy_check_node(state: RAGState) -> dict:
     # to reduce latency not doing one by one on each doc 
-    query = state["query"]
+    query = state.get("original_query") or state["query"]
     docs = state.get("retrieved_docs") or []
     doc_snippets = "\n\n---\n\n".join(doc.page_content[:300] for doc in docs[:3])
     if not doc_snippets:
@@ -220,7 +227,7 @@ def relevancy_check_node(state: RAGState) -> dict:
 
 
 def query_rewrite_node(state: RAGState) -> dict:
-    original_query = state["query"]
+    original_query = state.get("original_query") or state["query"]
     rewrite_count = state.get("rewrite_count", 0)
     response = llm.invoke([
         {"role": "system", "content": QUERY_REWRITE_SYSTEM},
@@ -228,8 +235,8 @@ def query_rewrite_node(state: RAGState) -> dict:
     ])
     rewritten = response.content.strip()
     return {
-        "messages": [HumanMessage(content=rewritten)],
-        "query": rewritten,
+        "messages": [HumanMessage(content=rewritten, additional_kwargs={"papeer_internal": True})],
+        "retrieval_query": rewritten,
         "retrieved_docs": [],
         "retrieval_attempts": 0,
         "rewrite_count": rewrite_count + 1,
@@ -254,7 +261,7 @@ verification_llm = llm.with_structured_output(ClaimVerificationResult)
 
 
 def verify_claim_node(state: RAGState) -> dict:
-    claim = state["messages"][-1].content
+    claim = state.get("original_query") or state["query"]
     tavily_client = TavilyClient(api_key=os.environ["TAVILY_API_KEY"])
 
     # General web search for recent work superseding the claim
@@ -305,12 +312,49 @@ def verify_claim_node(state: RAGState) -> dict:
     }
 
 
+def _message_to_chat_item(msg) -> dict | None:
+    if msg.additional_kwargs.get("papeer_internal"):
+        return None
+    if isinstance(msg, HumanMessage):
+        return {"role": "user", "content": msg.content if isinstance(msg.content, str) else str(msg.content)}
+    if isinstance(msg, AIMessage) and msg.content and not getattr(msg, "tool_calls", None):
+        return {"role": "assistant", "content": msg.content if isinstance(msg.content, str) else str(msg.content)}
+    return None
+
+
+def _restore_chat_history(state: RAGState) -> list[dict]:
+    history = state.get("chat_history") or []
+    if history:
+        return history
+    restored: list[dict] = []
+    for msg in state.get("messages", []):
+        item = _message_to_chat_item(msg)
+        if item:
+            restored.append(item)
+    return restored
+
+
+def _compact_messages(chat_history: list[dict]) -> list:
+    messages = [RemoveMessage(id=REMOVE_ALL_MESSAGES)]
+    last_assistant_idx = max(
+        (idx for idx, item in enumerate(chat_history) if item["role"] == "assistant"),
+        default=None,
+    )
+    for idx, item in enumerate(chat_history):
+        if item["role"] == "user":
+            messages.append(HumanMessage(content=item["content"]))
+        elif item["role"] == "assistant":
+            kwargs = {"papeer_final": True} if idx == last_assistant_idx else {}
+            messages.append(AIMessage(content=item["content"], additional_kwargs=kwargs))
+    return messages
+
+
 def generate_answer_node(state: RAGState) -> dict:
     route = state.get("route")
-    query = state["query"]
+    query = state.get("original_query") or state["query"]
 
     if route == "retrieve":
-        if state.get("is_relevant") is False and state.get("rewrite_count", 0) >= 1:
+        if state.get("is_relevant") is False and state.get("rewrite_count", 0) >= MAX_QUERY_REWRITES:
             answer = (
                 "I wasn't able to find relevant information in the uploaded papers "
                 "to answer your question. You may want to rephrase your question "
@@ -328,7 +372,7 @@ def generate_answer_node(state: RAGState) -> dict:
     elif route == "verify_claim":
         verdict = state.get("claim_verdict", "")
         papers = state.get("superseding_papers") or []
-        claim_text = state["query"]
+        claim_text = query
         if papers:
             papers_block = "\n\n".join(
                 f"{i + 1}. **{p['title']}**\n   {p['summary']}\n   Link: {p['url']}"
@@ -356,12 +400,23 @@ def generate_answer_node(state: RAGState) -> dict:
         prompt = f"Answer from your knowledge.\n\nQuestion: {query}"
         answer = llm.invoke([{"role": "user", "content": prompt}]).content
 
-    return {"answer": answer, "messages": [AIMessage(content=answer)]}
+    chat_history = list(_restore_chat_history(state))
+    if not chat_history or chat_history[-1].get("role") != "user" or chat_history[-1].get("content") != query:
+        chat_history.append({"role": "user", "content": query})
+    chat_history.append({"role": "assistant", "content": answer})
+    return {
+        "answer": answer,
+        "query": query,
+        "retrieval_query": None,
+        "chat_history": chat_history,
+        "messages": _compact_messages(chat_history),
+    }
 
 
 # ── Graph ─────────────────────────────────────────────────────────────────────
 
 MAX_RETRIEVAL_ATTEMPTS = 3
+MAX_QUERY_REWRITES = 3
 
 
 def route_query(state: RAGState) -> str:
@@ -383,7 +438,7 @@ def agent_routing(state: RAGState) -> str:
 def after_relevancy_routing(state: RAGState) -> str:
     if state.get("is_relevant", False):
         return "generate_answer"
-    if state.get("rewrite_count", 0) < 1:
+    if state.get("rewrite_count", 0) < MAX_QUERY_REWRITES:
         return "query_rewrite"
     return "generate_answer"
 
@@ -435,4 +490,3 @@ def build_graph(db_path: str = "checkpoints.db"):
     graph.add_edge("generate_answer", END)
 
     return graph.compile(checkpointer=checkpointer)
-

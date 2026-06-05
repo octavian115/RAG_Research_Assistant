@@ -15,7 +15,7 @@ from backend.vector_store import add_paper, list_papers
 
 st.set_page_config(page_title="Papeer", page_icon="📚", layout="centered")
 
-
+# to reduce latency to stop reloading at every interaction with the page
 @st.cache_resource
 def get_graph():
     return build_graph()
@@ -82,6 +82,7 @@ def generate_session_name(first_message: str) -> str:
 
 
 def maybe_rename_session(session_id: str, first_message: str) -> None:
+    # to check if already named or not because of streamlit rendering quirks
     if st.session_state.sessions_meta.get(session_id, {}).get("is_named"):
         return
     name = generate_session_name(first_message)
@@ -110,14 +111,35 @@ def load_session_chats(session_id: str) -> list[dict]:
         state = graph.get_state(config)
         if not state or not state.values:
             return []
+        if state.values.get("chat_history"):
+            chats = []
+            turn = 0
+            for item in state.values["chat_history"]:
+                if item.get("role") == "assistant":
+                    turn += 1
+                    chats.append(
+                        {
+                            "role": "assistant",
+                            "content": item.get("content", ""),
+                            "turn": turn,
+                            "graph_state": {},
+                        }
+                    )
+                elif item.get("role") == "user":
+                    chats.append({"role": "user", "content": item.get("content", "")})
+            return chats
         chats = []
         turn = 0
         for msg in state.values.get("messages", []):
+            if getattr(msg, "additional_kwargs", {}).get("papeer_internal"):
+                continue
             type_name = type(msg).__name__
             content = msg.content if isinstance(msg.content, str) else str(msg.content)
             if type_name == "HumanMessage":
                 chats.append({"role": "user", "content": content})
             elif type_name in ("AIMessage", "AIMessageChunk"):
+                if not content or getattr(msg, "tool_calls", None):
+                    continue
                 turn += 1
                 chats.append({"role": "assistant", "content": content, "turn": turn, "graph_state": {}})
         return chats
@@ -350,7 +372,9 @@ if prompt := st.chat_input("Ask about your papers, verify a claim, or search the
         input_state = {
             "messages": [HumanMessage(content=prompt)],
             "session_id": active_sid,
+            "original_query": prompt,
             "query": prompt,
+            "retrieval_query": None,
             "route": None,
             "retrieved_docs": [],
             "retrieval_attempts": 0,
@@ -360,6 +384,7 @@ if prompt := st.chat_input("Ask about your papers, verify a claim, or search the
             "answer": None,
             "is_relevant": None,
             "rewrite_count": 0,
+            "chat_history": st.session_state.chats[active_sid],
         }
         config = {"configurable": {"thread_id": active_sid}}
 
@@ -371,6 +396,7 @@ if prompt := st.chat_input("Ask about your papers, verify a claim, or search the
                 if (
                     metadata.get("langgraph_node") == "generate_answer"
                     and hasattr(chunk, "content")
+                    and getattr(chunk, "additional_kwargs", {}).get("papeer_final")
                     and chunk.content
                 ):
                     response_text += chunk.content
@@ -398,4 +424,5 @@ if prompt := st.chat_input("Ask about your papers, verify a claim, or search the
         )
 
         if is_first_message:
+            # to rename if it is the first message
             st.rerun()
