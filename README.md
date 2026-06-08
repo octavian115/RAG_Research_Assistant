@@ -2,6 +2,8 @@
 
 A conversational AI assistant for students and researchers to upload, explore, and verify academic papers through natural language chat.
 
+**Live Demo:** [papertrail-3alj.onrender.com](https://papertrail-3alj.onrender.com/)
+
 ---
 
 ## Project Description
