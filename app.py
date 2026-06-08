@@ -7,21 +7,52 @@ import streamlit as st
 from langchain_core.messages import HumanMessage
 from langchain_openai import ChatOpenAI
 
-from backend.btw_handler import handle_btw
+from backend.config import has_database_url, missing_required_env_vars
 from backend.paper_loader import load_arxiv, load_document, load_webpage
-from backend.rag_graph import build_graph
 from backend.session_store import load_sessions, save_sessions
 from backend.vector_store import add_paper, list_papers
 
 st.set_page_config(page_title="PaperTrail", page_icon="📚", layout="centered")
 
+missing_env = missing_required_env_vars()
+
+
+def _show_setup_screen(missing: list[str]) -> None:
+    st.title("📚 PaperTrail")
+    st.error("PaperTrail is not fully configured yet.")
+    st.markdown("Add the missing environment variables, then restart the app.")
+    st.code("\n".join(missing), language="text")
+    st.caption("DATABASE_URL is optional locally, but recommended for deployed session persistence.")
+
+
+if missing_env:
+    _show_setup_screen(missing_env)
+    st.stop()
+
+
 # to reduce latency to stop reloading at every interaction with the page
 @st.cache_resource
 def get_graph():
+    from backend.rag_graph import build_graph
+
     return build_graph()
 
 
 _rename_llm = ChatOpenAI(model="gpt-5-mini")
+
+
+def _friendly_error(error: Exception) -> str:
+    text = str(error)
+    lowered = text.lower()
+    if "qdrant" in lowered or "collection" in lowered:
+        return "I could not reach the document vector store. Please check the Qdrant configuration and try again."
+    if "tavily" in lowered:
+        return "I could not complete the web search. Please check the Tavily API key and try again."
+    if "openai" in lowered or "api_key" in lowered or "api key" in lowered:
+        return "I could not reach the language model provider. Please check the OpenAI API key and try again."
+    if "database" in lowered or "postgres" in lowered or "connection" in lowered:
+        return "I could not reach the session database. Please check DATABASE_URL and try again."
+    return f"Something went wrong while processing that request: {text}"
 
 
 def _serialize_state(values: dict) -> dict:
@@ -76,7 +107,10 @@ def maybe_rename_session(session_id: str, first_message: str) -> None:
     name = generate_session_name(first_message)
     st.session_state.sessions_meta[session_id]["name"] = name
     st.session_state.sessions_meta[session_id]["is_named"] = True
-    save_sessions(st.session_state.sessions_meta)
+    try:
+        save_sessions(st.session_state.sessions_meta)
+    except Exception as e:
+        st.warning(_friendly_error(e))
 
 
 def create_session() -> str:
@@ -87,7 +121,10 @@ def create_session() -> str:
         "created_at": datetime.now().isoformat(),
         "is_named": False,
     }
-    save_sessions(st.session_state.sessions_meta)
+    try:
+        save_sessions(st.session_state.sessions_meta)
+    except Exception as e:
+        st.warning(_friendly_error(e))
     st.session_state.chats[sid] = []
     st.session_state.turns[sid] = 0
     return sid
@@ -148,7 +185,11 @@ graph = get_graph()
 
 # ── Bootstrap ──────────────────────────────────────────────────────────────────
 if "sessions_meta" not in st.session_state:
-    st.session_state.sessions_meta = load_sessions()
+    try:
+        st.session_state.sessions_meta = load_sessions()
+    except Exception as e:
+        st.error(_friendly_error(e))
+        st.stop()
 if "chats" not in st.session_state:
     st.session_state.chats = {}
 if "turns" not in st.session_state:
@@ -168,6 +209,9 @@ active_sid = st.session_state.active_session_id
 
 # ── Sidebar ────────────────────────────────────────────────────────────────────
 with st.sidebar:
+    if not has_database_url():
+        st.caption("Local session persistence is using files. Set DATABASE_URL for deployment.")
+
     if st.button("+ New Chat", use_container_width=True):
         new_sid = create_session()
         st.session_state.active_session_id = new_sid
@@ -334,10 +378,15 @@ if prompt := st.chat_input("Ask about your papers, verify a claim, or search the
             else:
                 placeholder = st.empty()
                 response_text = ""
-                for chunk in handle_btw(query):
-                    response_text += chunk
-                    placeholder.markdown(response_text + "▌")
-                placeholder.markdown(response_text)
+                try:
+                    from backend.btw_handler import handle_btw
+
+                    for chunk in handle_btw(query):
+                        response_text += chunk
+                        placeholder.markdown(response_text + "▌")
+                    placeholder.markdown(response_text)
+                except Exception as e:
+                    placeholder.error(_friendly_error(e))
             st.caption("Side channel — not saved to session history.")
 
     else:
@@ -379,25 +428,30 @@ if prompt := st.chat_input("Ask about your papers, verify a claim, or search the
         with st.chat_message("assistant"):
             placeholder = st.empty()
             response_text = ""
+            state_snapshot = {}
 
-            for chunk, metadata in graph.stream(input_state, config, stream_mode="messages"):
-                if (
-                    metadata.get("langgraph_node") == "generate_answer"
-                    and hasattr(chunk, "content")
-                    and getattr(chunk, "additional_kwargs", {}).get("papeer_final")
-                    and chunk.content
-                ):
-                    response_text += chunk.content
-                    placeholder.markdown(response_text + "▌")
+            try:
+                for chunk, metadata in graph.stream(input_state, config, stream_mode="messages"):
+                    if (
+                        metadata.get("langgraph_node") == "generate_answer"
+                        and hasattr(chunk, "content")
+                        and getattr(chunk, "additional_kwargs", {}).get("papeer_final")
+                        and chunk.content
+                    ):
+                        response_text += chunk.content
+                        placeholder.markdown(response_text + "▌")
 
-            if not response_text:
+                if not response_text:
+                    final_values = graph.get_state(config).values
+                    response_text = final_values.get("answer") or "No response generated."
+
+                placeholder.markdown(response_text)
+
                 final_values = graph.get_state(config).values
-                response_text = final_values.get("answer") or "No response generated."
-
-            placeholder.markdown(response_text)
-
-            final_values = graph.get_state(config).values
-            state_snapshot = _serialize_state(final_values)
+                state_snapshot = _serialize_state(final_values)
+            except Exception as e:
+                response_text = _friendly_error(e)
+                placeholder.error(response_text)
 
             with st.expander(f"📊 Graph state · turn {current_turn}", expanded=False):
                 st.json(state_snapshot)

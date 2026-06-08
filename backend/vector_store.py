@@ -1,4 +1,5 @@
 import os
+from functools import lru_cache
 
 from dotenv import load_dotenv
 from langchain_classic.embeddings import CacheBackedEmbeddings
@@ -17,21 +18,30 @@ EMBEDDING_DIM = 1536  # text-embedding-3-small
 
 # ── Singletons ────────────────────────────────────────────────────────────────
 
-base_embeddings = OpenAIEmbeddings(model="text-embedding-3-small")
-embedding_file_store = LocalFileStore("./embedding_cache/")
-embeddings = CacheBackedEmbeddings.from_bytes_store(
-    base_embeddings,
-    embedding_file_store,
-    namespace=base_embeddings.model,
-    query_embedding_cache=True,
-    key_encoder="blake2b",
-)
+@lru_cache(maxsize=1)
+def get_embeddings():
+    base_embeddings = OpenAIEmbeddings(model="text-embedding-3-small")
+    embedding_file_store = LocalFileStore("./embedding_cache/")
+    return CacheBackedEmbeddings.from_bytes_store(
+        base_embeddings,
+        embedding_file_store,
+        namespace=base_embeddings.model,
+        query_embedding_cache=True,
+        key_encoder="blake2b",
+    )
 
-qdrant_client = QdrantClient(
-    url=os.environ["QDRANT_URL"],
-    api_key=os.environ["QDRANT_API_KEY"],
-    timeout=120,
-)
+
+@lru_cache(maxsize=1)
+def get_qdrant_client() -> QdrantClient:
+    qdrant_url = os.getenv("QDRANT_URL")
+    qdrant_api_key = os.getenv("QDRANT_API_KEY")
+    if not qdrant_url or not qdrant_api_key:
+        raise RuntimeError("Qdrant is not configured. Set QDRANT_URL and QDRANT_API_KEY.")
+    return QdrantClient(
+        url=qdrant_url,
+        api_key=qdrant_api_key,
+        timeout=120,
+    )
 
 
 # ── Collection ───────────────────────────────────────────────────────────────
@@ -41,6 +51,7 @@ def get_collection_name(session_id: str) -> str:
 
 
 def get_vectorstore(session_id: str) -> QdrantVectorStore:
+    qdrant_client = get_qdrant_client()
     collection_name = get_collection_name(session_id)
     if not qdrant_client.collection_exists(collection_name):
         qdrant_client.create_collection(
@@ -50,7 +61,7 @@ def get_vectorstore(session_id: str) -> QdrantVectorStore:
     return QdrantVectorStore(
         client=qdrant_client,
         collection_name=collection_name,
-        embedding=embeddings,
+        embedding=get_embeddings(),
     )
 
 
@@ -62,6 +73,7 @@ def add_paper(docs: list[Document], session_id: str) -> None:
 
 def list_papers(session_id: str) -> list[str]:
     # to load all the papers in the UI in the sidebar
+    qdrant_client = get_qdrant_client()
     collection_name = get_collection_name(session_id)
     if not qdrant_client.collection_exists(collection_name):
         return []

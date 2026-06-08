@@ -1,0 +1,20 @@
+services:
+  - type: web
+    name: papertrail
+    runtime: python
+    plan: free
+    buildCommand: uv sync --frozen
+    startCommand: uv run streamlit run app.py --server.port $PORT --server.address 0.0.0.0 --server.headless true
+    envVars:
+      - key: PYTHON_VERSION
+        value: 3.12.12
+      - key: OPENAI_API_KEY
+        sync: false
+      - key: TAVILY_API_KEY
+        sync: false
+      - key: QDRANT_URL
+        sync: false
+      - key: QDRANT_API_KEY
+        sync: false
+      - key: DATABASE_URL
+        sync: false
