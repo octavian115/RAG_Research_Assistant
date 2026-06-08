@@ -15,9 +15,9 @@ COPY documents/ documents/
 # ── Layer 4: application files (change most often — last for cache efficiency) ─
 COPY app.py .
 COPY evaluate.py .
+COPY evaluate_smoke.py .
 COPY main.py .
 COPY goldens.json .
-COPY sessions.json .
 
 EXPOSE 8501
 

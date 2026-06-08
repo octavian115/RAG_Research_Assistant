@@ -112,7 +112,7 @@ def main() -> None:
     results = evaluate(
         test_cases,
         metrics,
-        async_config=AsyncConfig(max_concurrent=3, throttle_value=5),
+        async_config=AsyncConfig(max_concurrent=3, throttle_value=5), # throttle value for waiting time between api calls ,  max_concurrent for batches
     )
 
     summary = []

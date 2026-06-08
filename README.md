@@ -1,4 +1,4 @@
-# PaperTrail — Research Paper Assistant
+# PaperTrail - Research Paper Assistant
 
 A conversational AI assistant for students and researchers to upload, explore, and verify academic papers through natural language chat.
 
@@ -104,6 +104,7 @@ All keys are loaded from a `.env` file in the project root via `python-dotenv`.
 | `TAVILY_API_KEY` | Web search for current developments and claim verification | [tavily.com](https://tavily.com) |
 | `QDRANT_URL` | Qdrant Cloud endpoint for the vector store | [cloud.qdrant.io](https://cloud.qdrant.io) |
 | `QDRANT_API_KEY` | Authentication for Qdrant Cloud | [cloud.qdrant.io](https://cloud.qdrant.io) |
+| `DATABASE_URL` | Optional Postgres URL for deployed session/checkpoint persistence | [neon.tech](https://neon.tech) |
 
 `.env` file format:
 ```env
@@ -111,6 +112,7 @@ OPENAI_API_KEY=sk-...
 TAVILY_API_KEY=tvly-...
 QDRANT_URL=https://your-cluster.qdrant.io
 QDRANT_API_KEY=your-qdrant-api-key
+DATABASE_URL=postgresql://user:password@host/db?sslmode=require
 ```
 
 ---
@@ -123,6 +125,7 @@ app.py (Streamlit UI)
 ├── backend/rag_graph.py       — LangGraph RAG workflow (router → retrieve/verify/direct → answer)
 ├── backend/btw_handler.py     — Off-topic /btw handler (streaming, not stored in history)
 ├── backend/vector_store.py    — Qdrant Cloud vector store with cached embeddings
+├── backend/session_store.py   — Session metadata persistence (Postgres or local fallback)
 ├── backend/paper_loader.py    — Multi-source paper loader (PDF, TXT, MD, URL, ArXiv)
 └── backend/models.py          — Pydantic models for routing and structured LLM outputs
 ```
@@ -152,10 +155,10 @@ User Query
 | Optimization | Details |
 |---|---|
 | **Embedding cache** | `CacheBackedEmbeddings` writes to `./embedding_cache/` so identical text is never re-embedded across sessions — reduces OpenAI API calls and latency |
-| **Session isolation** | Each session gets its own Qdrant collection (`papeer_{session_id}`) and a separate LangGraph SQLite checkpointer thread — prevents cross-session data leakage |
+| **Session isolation** | Each session gets its own Qdrant collection (`papeer_{session_id}`) and LangGraph checkpoint thread — prevents cross-session data leakage |
 | **Graph caching** | The LangGraph graph is built once with `@st.cache_resource` and reused across all Streamlit reruns |
 | **Streaming responses** | `graph.stream()` is used with message mode so responses appear token-by-token rather than waiting for the full generation |
-| **Session persistence** | `sessions.json` persists session metadata; SQLite stores full conversation state — app restarts restore the previous session seamlessly |
+| **Session persistence** | In deployment, Postgres stores session metadata and LangGraph checkpoints via `DATABASE_URL`; locally, the app falls back to `sessions.json` and SQLite if no database URL is configured |
 | **Temp file cleanup** | Uploaded files are written to a temp path, processed, then deleted regardless of success or failure |
 | **Async evaluation** | The evaluation pipeline uses throttled concurrency (3 workers, 5 s throttle) to stay within API rate limits |
 | **ArXiv reliability** | Claim verification uses two targeted Tavily searches (general web + `site:arxiv.org`) instead of the `arxiv` Python library, which had reliability issues |

@@ -161,8 +161,11 @@ venv.bak/
 
 # App runtime state
 sessions.json
-checkpoints.db
-eval_checkpoints.db
+checkpoints.db*
+eval_checkpoints.db*
+smoke_eval_checkpoints.db*
+smoke_eval_cache.json
+smoke_eval_results.json
 embedding_cache/
 
 # Spyder project settings

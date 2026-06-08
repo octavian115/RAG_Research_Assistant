@@ -1,8 +1,8 @@
 {
   "9bb44ae6-6db1-4342-a551-de9e096e8130": {
     "id": "9bb44ae6-6db1-4342-a551-de9e096e8130",
-    "name": "New Session",
+    "name": "Introductory Research Chat",
     "created_at": "2026-06-05T12:03:09.268583",
-    "is_named": false
+    "is_named": true
   }
 }

@@ -1,4 +1,3 @@
-import json
 import tempfile
 import uuid
 from datetime import datetime
@@ -11,6 +10,7 @@ from langchain_openai import ChatOpenAI
 from backend.btw_handler import handle_btw
 from backend.paper_loader import load_arxiv, load_document, load_webpage
 from backend.rag_graph import build_graph
+from backend.session_store import load_sessions, save_sessions
 from backend.vector_store import add_paper, list_papers
 
 st.set_page_config(page_title="PaperTrail", page_icon="📚", layout="centered")
@@ -21,19 +21,7 @@ def get_graph():
     return build_graph()
 
 
-SESSIONS_FILE = Path("sessions.json")
 _rename_llm = ChatOpenAI(model="gpt-5-mini")
-
-
-def load_sessions() -> dict:
-    try:
-        return json.loads(SESSIONS_FILE.read_text(encoding="utf-8"))
-    except (FileNotFoundError, json.JSONDecodeError):
-        return {}
-
-
-def save_sessions(sessions_meta: dict) -> None:
-    SESSIONS_FILE.write_text(json.dumps(sessions_meta, indent=2), encoding="utf-8")
 
 
 def _serialize_state(values: dict) -> dict:

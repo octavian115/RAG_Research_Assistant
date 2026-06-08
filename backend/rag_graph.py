@@ -12,11 +12,14 @@ from langchain_core.prompts import ChatPromptTemplate
 from langchain_core.tools import InjectedToolCallId, tool
 from langchain_openai import ChatOpenAI
 from langgraph.checkpoint.sqlite import SqliteSaver
+from langgraph.checkpoint.postgres import PostgresSaver
 from langgraph.graph import END, MessagesState, StateGraph
 from langgraph.graph.message import REMOVE_ALL_MESSAGES
 from langgraph.prebuilt import InjectedState, ToolNode, tools_condition
 from langgraph.types import Command
 from pydantic import BaseModel, Field
+from psycopg.rows import dict_row
+from psycopg_pool import ConnectionPool
 from tavily import TavilyClient
 
 from backend.models import ClaimVerificationResult, RelevancyDecision, RouterDecision
@@ -443,9 +446,24 @@ def after_relevancy_routing(state: RAGState) -> str:
     return "generate_answer"
 
 
-def build_graph(db_path: str = "checkpoints.db"):
-    conn = sqlite3.connect(db_path, check_same_thread=False)
-    checkpointer = SqliteSaver(conn)
+def build_graph(db_path: str | None = None):
+    database_url = os.getenv("DATABASE_URL")
+    if database_url and db_path is None:
+        pool = ConnectionPool(
+            database_url,
+            kwargs={
+                "autocommit": True,
+                "prepare_threshold": 0,
+                "row_factory": dict_row,
+            },
+            min_size=1,
+            max_size=5,
+        )
+        checkpointer = PostgresSaver(pool)
+        checkpointer.setup()
+    else:
+        conn = sqlite3.connect(db_path or "checkpoints.db", check_same_thread=False)
+        checkpointer = SqliteSaver(conn)
 
     graph = StateGraph(RAGState)
     graph.add_node("router", router_node)
