@@ -247,3 +247,7 @@ embedding_cache/
 
 # deep eval
 .deepeval/.venv/
+
+#clean repo
+eval_results.json
+.deepeval/
