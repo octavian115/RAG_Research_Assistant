@@ -346,8 +346,8 @@ with st.sidebar:
 # ── Page header ────────────────────────────────────────────────────────────────
 st.title("📚 PaperTrail — Research Paper Assistant")
 st.markdown(
-    "🔍 **Ask questions** from your uploaded papers &nbsp;·&nbsp; "
-    "✅ **Verify claims** against recent literature &nbsp;·&nbsp; "
+    "🔍 **Ask questions** from your uploaded papers  \n"
+    "✅ **Verify claims** against recent literature  \n"
     "🌐 **Search the web** for the latest findings\n\n"
     "> Upload documents in the sidebar and start chatting below."
 )
